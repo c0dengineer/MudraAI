@@ -1,0 +1,20 @@
+# Local Python environment
+venv/
+
+# Python cache files
+__pycache__/
+*.pyc
+
+# Large local training images (the README links to the A/B/C source dataset)
+dataset/
+
+# Local data-collection and model-training scripts
+capture_data.py
+capture_nogesture.py
+nogesture_capture.py
+train.py
+
+# Editor and operating-system files
+.vscode/
+.DS_Store
+Thumbs.db
