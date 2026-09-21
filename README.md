@@ -11,6 +11,45 @@ A webcam-based gesture-to-speech application that recognizes the static hand sig
 - No speech for `No_Gesture`
 - CNN training pipeline with normalization, augmentation, validation split, early stopping, and checkpointing
 
+## Tech Stack
+
+- Python 3.x
+- OpenCV for live webcam capture and image preprocessing
+- TensorFlow / Keras for CNN model training and inference
+- NumPy for numerical image processing
+- pyttsx3 for offline text-to-speech conversion
+- Matplotlib / image utilities for training visualization and evaluation
+
+## System Architecture
+
+The system follows a simple vision-to-speech pipeline:
+
+```mermaid
+flowchart LR
+    A[Webcam Input] --> B[Frame Preprocessing]
+    B --> C[CNN Classifier]
+    C --> D{Prediction}
+    D -->|A / B / C| E[Confidence Check]
+    D -->|No_Gesture| F[No Speech Output]
+    E --> G[pyttsx3 Speech Synthesis]
+    G --> H[Display Result on Screen]
+    H --> A
+```
+
+The application captures a live frame, resizes it to 64 x 64, normalizes pixel values, and sends it to the trained CNN. If the predicted class is one of A, B, or C and the confidence is above the defined threshold, the system speaks the recognized gesture using a text-to-speech engine.
+
+## How It Works
+
+1. The webcam captures a live image frame.
+2. The frame is resized and normalized to match the CNN input format.
+3. The trained model predicts one of four classes: A, B, C, or `No_Gesture`.
+4. The predicted class and confidence score are displayed on the screen.
+5. If the class is `No_Gesture`, the system remains silent.
+6. If the gesture is A, B, or C and the confidence is sufficiently high, the corresponding word is spoken aloud.
+7. The loop continues until the user presses `Q` to exit.
+
+This design ensures that the application reacts in real time while preventing false speech outputs from irrelevant frames.
+
 ## Dataset
 
 The dataset is organized as follows:
@@ -61,9 +100,10 @@ The best random held-out validation split reached **100.00% accuracy**. This sco
 From the `gesture-to-speech-cnn` directory:
 
 ```powershell
+cd gesture-to-speech-cnn
 python -m venv venv
-.\venv\Scripts\activate
-pip install -r requirements.txt
+.\venv\Scripts\Activate
+python -m pip install -r requirements.txt
 ```
 
 The trained model is already available, so start the application with:
@@ -101,6 +141,16 @@ gesture-to-speech-cnn/
 |-- train.py              # Model training
 `-- requirements.txt
 ```
+
+## Student Details
+
+- Student Name: Navya Roshni
+- Roll No.: 5024142
+- Semester: V
+- Academic Year: 2026-2027
+- Subject: AI
+- Project Title: MudraAI
+- Github Repository: https://github.com/c0dengineer
 
 ## Reference
 
