@@ -8,11 +8,11 @@ __pycache__/
 # Large local training images (the README links to the A/B/C source dataset)
 dataset/
 
-# Local data-collection and model-training scripts
+# Local data-collection
 capture_data.py
 capture_nogesture.py
-nogesture_capture.py
-train.py
+capture_nothing.py
+
 
 # Editor and operating-system files
 .vscode/

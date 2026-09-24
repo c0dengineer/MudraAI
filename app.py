@@ -1,24 +1,44 @@
+from collections import deque
+from pathlib import Path
+
 import cv2
+import mediapipe as mp
 import numpy as np
-import tensorflow as tf
 import pyttsx3
+import tensorflow as tf
+
+from gesture_utils import HandCropper
+
+
+PROJECT_DIR = Path(__file__).resolve().parent
+LANDMARK_MODEL_PATH = PROJECT_DIR / "models" / "gesture_landmark_model.keras"
+CLASS_NAMES_PATH = PROJECT_DIR / "class_names.txt"
+CONFIDENCE_THRESHOLD = 0.80
+SMOOTHING_WINDOW = 5
+STABLE_FRAMES = 4
+HAND_CONNECTIONS = [
+    (connection.start, connection.end)
+    for connection in mp.tasks.vision.HandLandmarksConnections.HAND_CONNECTIONS
+]
 
 # Load trained model
-model = tf.keras.models.load_model(
-    "models/gesture_model.keras"
-)
+model = tf.keras.models.load_model(LANDMARK_MODEL_PATH)
 
 # Load class names
-with open("class_names.txt", "r") as f:
+with CLASS_NAMES_PATH.open("r") as f:
     class_names = [line.strip() for line in f.readlines()]
 
-# Text-to-speech engine
-engine = pyttsx3.init()
+def speak_prediction(prediction: str) -> None:
+    engine = pyttsx3.init()
+    engine.say(prediction)
+    engine.runAndWait()
+    engine.stop()
 
 cap = cv2.VideoCapture(0)
+hand_cropper = HandCropper()
 
-last_prediction = ""
-spoken_prediction = ""
+prediction_history = deque(maxlen=SMOOTHING_WINDOW)
+last_spoken_prediction = ""
 
 print("Starting real-time gesture recognition...")
 print("Press Q to quit.")
@@ -30,25 +50,44 @@ while True:
         print("Could not access camera.")
         break
 
-    # Resize frame to CNN input size
-    image = cv2.resize(frame, (64, 64))
+    detection = hand_cropper.detect(frame)
+    if detection.vector is None:
+        predicted_class = "No_Gesture"
+        confidence = 1.0
+    else:
+        model_input = np.expand_dims(detection.vector, axis=0)
+        predictions = model.predict(model_input, verbose=0)
+        predicted_index = int(np.argmax(predictions[0]))
+        confidence = float(predictions[0][predicted_index])
+        predicted_class = class_names[predicted_index]
+        if confidence < CONFIDENCE_THRESHOLD:
+            predicted_class = "No_Gesture"
 
-    # Normalize pixel values
-    image = image.astype("float32") / 255.0
+    prediction_history.append(predicted_class)
+    stable_class = predicted_class
+    if len(prediction_history) == SMOOTHING_WINDOW:
+        candidate = prediction_history[-1]
+        if prediction_history.count(candidate) >= STABLE_FRAMES:
+            stable_class = candidate
 
-    # Add batch dimension
-    image = np.expand_dims(image, axis=0)
+    if detection.box is not None:
+        left, top, right, bottom = detection.box
+        cv2.rectangle(frame, (left, top), (right, bottom), (255, 180, 0), 2)
 
-    # Prediction
-    predictions = model.predict(image, verbose=0)
-
-    predicted_index = np.argmax(predictions[0])
-    confidence = float(predictions[0][predicted_index])
-
-    predicted_class = class_names[predicted_index]
+    if detection.landmarks is not None:
+        for start, end in HAND_CONNECTIONS:
+            cv2.line(
+                frame,
+                detection.landmarks[start],
+                detection.landmarks[end],
+                (0, 255, 0),
+                2,
+            )
+        for point in detection.landmarks:
+            cv2.circle(frame, point, 5, (0, 0, 255), -1)
 
     # Display prediction
-    text = f"Prediction: {predicted_class}"
+    text = f"Prediction: {stable_class}"
     confidence_text = f"Confidence: {confidence * 100:.2f}%"
 
     cv2.putText(
@@ -76,31 +115,17 @@ while True:
         frame
     )
 
-    # Do not speak when the model sees an empty or unrelated frame. Reset the
-    # last spoken gesture so the same sign can be spoken after no gesture.
-    if predicted_class == "No_Gesture":
-        spoken_prediction = ""
-
-    # Speak only confident A/B/C predictions when the gesture changes.
-    elif confidence > 0.80 and predicted_class != spoken_prediction:
-
-        print(
-            f"Recognized: {predicted_class} "
-            f"({confidence * 100:.2f}%)"
-        )
-
-        engine.say(predicted_class)
-        engine.runAndWait()
-
-        spoken_prediction = predicted_class
-
-    # Reset speech when prediction changes
-    if predicted_class != last_prediction:
-        last_prediction = predicted_class
+    if stable_class == "No_Gesture":
+        last_spoken_prediction = ""
+    elif confidence >= CONFIDENCE_THRESHOLD and stable_class != last_spoken_prediction:
+        print(f"Recognized: {stable_class} ({confidence * 100:.2f}%)")
+        speak_prediction(stable_class)
+        last_spoken_prediction = stable_class
 
     # Quit
     if cv2.waitKey(1) & 0xFF == ord("q"):
         break
 
 cap.release()
+hand_cropper.close()
 cv2.destroyAllWindows()

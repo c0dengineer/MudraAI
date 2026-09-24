@@ -1,7 +1,7 @@
 # MudraAI
 # Vision-Based Real-Time Gesture-to-Speech Translation
 
-A webcam-based gesture-to-speech application that recognizes the static hand signs **A**, **B**, and **C**. A CNN classifies each frame and PyTTSX3 speaks recognized gestures. A fourth `No_Gesture` class prevents empty frames from being incorrectly treated as signs.
+A webcam-based gesture-to-speech application that recognizes the static hand signs **A**, **B**, and **C**. MediaPipe extracts hand landmarks and a neural network classifies their positions. A fourth `No_Gesture` class prevents blank and unrelated hand poses from being treated as signs.
 
 ## Features
 
@@ -9,16 +9,16 @@ A webcam-based gesture-to-speech application that recognizes the static hand sig
 - Confidence score displayed on screen
 - Text-to-speech output for A, B, and C
 - No speech for `No_Gesture`
-- CNN training pipeline with normalization, augmentation, validation split, early stopping, and checkpointing
+- Landmark training pipeline with normalization, validation split, early stopping, class weighting, and checkpointing
 
 ## Tech Stack
 
 - Python 3.x
-- OpenCV for live webcam capture and image preprocessing
-- TensorFlow / Keras for CNN model training and inference
-- NumPy for numerical image processing
+- OpenCV for live webcam capture and display
+- MediaPipe for hand detection and landmark extraction
+- TensorFlow / Keras for landmark model training and inference
+- NumPy for landmark feature processing
 - pyttsx3 for offline text-to-speech conversion
-- Matplotlib / image utilities for training visualization and evaluation
 
 ## System Architecture
 
@@ -26,8 +26,8 @@ The system follows a simple vision-to-speech pipeline:
 
 ```mermaid
 flowchart LR
-    A[Webcam Input] --> B[Frame Preprocessing]
-    B --> C[CNN Classifier]
+    A[Webcam Input] --> B[MediaPipe Hand Landmarks]
+    B --> C[Landmark Classifier]
     C --> D{Prediction}
     D -->|A / B / C| E[Confidence Check]
     D -->|No_Gesture| F[No Speech Output]
@@ -36,19 +36,19 @@ flowchart LR
     H --> A
 ```
 
-The application captures a live frame, resizes it to 64 x 64, normalizes pixel values, and sends it to the trained CNN. If the predicted class is one of A, B, or C and the confidence is above the defined threshold, the system speaks the recognized gesture using a text-to-speech engine.
+The application detects a hand in each live frame, extracts and normalizes its 21 landmarks, and sends the 63 landmark coordinates to the trained classifier. If no hand is detected, the result is `No_Gesture`. A prediction must remain stable across several frames before speech is produced.
 
 ## How It Works
 
 1. The webcam captures a live image frame.
-2. The frame is resized and normalized to match the CNN input format.
-3. The trained model predicts one of four classes: A, B, C, or `No_Gesture`.
+2. The 21 hand landmarks are normalized relative to the wrist and hand scale.
+3. The trained landmark model predicts one of four classes: A, B, C, or `No_Gesture`.
 4. The predicted class and confidence score are displayed on the screen.
 5. If the class is `No_Gesture`, the system remains silent.
 6. If the gesture is A, B, or C and the confidence is sufficiently high, the corresponding word is spoken aloud.
 7. The loop continues until the user presses `Q` to exit.
 
-This design ensures that the application reacts in real time while preventing false speech outputs from irrelevant frames.
+The app speaks a letter only once for each stable gesture. It stays silent while the same gesture remains visible and speaks again only after the detected class changes or `No_Gesture` resets the speech state.
 
 ## Dataset
 
@@ -59,31 +59,28 @@ dataset/
 |-- A/              3,000 images
 |-- B/              3,000 images
 |-- C/              3,000 images
-`-- No_Gesture/       500 images
+|-- No_Gesture/       500 images  # random non-target hand poses
+`-- nothing/         3,000 images  # blank scenes
 ```
 
-The A, B, and C gesture images are sourced from the [ASL Alphabet Dataset on Kaggle](https://www.kaggle.com/datasets/grassknoted/asl-alphabet?resource=download). `No_Gesture` images were captured locally and include frames without A/B/C signs. During training, `No_Gesture` is weighted to compensate for its smaller size.
+The A, B, and C gesture images are sourced from the [ASL Alphabet Dataset on Kaggle](https://www.kaggle.com/datasets/grassknoted/asl-alphabet?resource=download). `No_Gesture` and `nothing` are two source folders for one model output class, `No_Gesture`. Both produce a visible `No_Gesture` prediction and no speech.
 
 ## Model
 
-Input frames are resized to **64 x 64** and normalized to the range 0–1. The model uses:
+The landmark model receives **63 values**: x, y, and z coordinates for 21 normalized hand landmarks. It uses:
 
 ```text
-Input (64 x 64 x 3)
-  -> random rotation and translation during training
-  -> Conv2D (16) + max pooling
-  -> Conv2D (32) + max pooling
-  -> Conv2D (64)
-  -> global average pooling
-  -> Dense (64) + dropout (0.35)
+Input (21 landmarks x 3 coordinates)
+  -> Dense (128) + dropout
+  -> Dense (64) + dropout
   -> Softmax output (A / B / C / No_Gesture)
 ```
 
-The model is optimized with Adam (`learning_rate=0.001`). The best validation-loss checkpoint is saved to `models/gesture_model.keras`.
+The model is optimized with Adam (`learning_rate=0.001`). The best validation-loss checkpoint is saved to `models/gesture_landmark_model.keras`.
 
 ## Results
 
-The trained model correctly recognized each gesture in the live webcam test. The screenshots below show the application output.
+The trained model correctly recognized each gesture in the live webcam test. Watch the [gesture prediction demo](assets/results/gesturepredictions.mp4), then see the screenshots below.
 
 | A | B |
 |---|---|
@@ -93,7 +90,7 @@ The trained model correctly recognized each gesture in the live webcam test. The
 |---|---|
 | <img src="assets/results/prediction-c.png" alt="Live prediction of C" width="440"> | <img src="assets/results/no-gesture.png" alt="Live No Gesture prediction" width="440"> |
 
-The best random held-out validation split reached **100.00% accuracy**. This score reflects images from the collected dataset; live performance can still vary with lighting, background, camera angle, and hand position.
+The recent random held-out landmark split reached **99.89% validation accuracy**. This score reflects the collected landmark samples; live performance can still vary with hand orientation, camera angle, lighting, and poses not represented in the dataset.
 
 ## How to Run
 
@@ -106,7 +103,27 @@ python -m venv venv
 python -m pip install -r requirements.txt
 ```
 
-The trained model is already available, so start the application with:
+To collect random non-target hand poses into `dataset/No_Gesture`:
+
+```powershell
+python capture_nogesture.py
+```
+
+To collect blank scenes into `dataset/nothing`:
+
+```powershell
+python capture_nothing.py
+```
+
+Train or retrain the landmark model. Training applies the same MediaPipe landmark preprocessing used by the live application:
+
+```powershell
+python train.py
+```
+
+This model uses normalized 21-point hand landmarks. Images without a detected hand become `No_Gesture`; random hand poses must be collected in `dataset/No_Gesture` so they learn rejection instead of being forced into A, B, or C.
+
+The landmark model is saved to `models/gesture_landmark_model.keras`. Start the application with:
 
 ```powershell
 python app.py
@@ -118,7 +135,8 @@ Press `Q` in the webcam window to quit.
 
 ```powershell
 python capture_data.py
-python nogesture_capture.py
+python capture_nogesture.py
+python capture_nothing.py
 ```
 
 If you add or change dataset images, retrain the model:
@@ -131,13 +149,15 @@ python train.py
 
 ```text
 gesture-to-speech-cnn/
-|-- assets/results/       # Live prediction screenshots
-|-- dataset/              # A, B, C, and No_Gesture images
-|-- models/               # Saved Keras model
+|-- assets/results/       # Live prediction screenshots and live webcam test.
+|-- dataset/              # A, B, C, No_Gesture, and nothing images
+|-- models/               # Landmark model and MediaPipe task model
 |-- references/           # Academic reference PDF
 |-- app.py                # Real-time gesture-to-speech application
 |-- capture_data.py       # A/B/C data collection
-|-- nogesture_capture.py  # No_Gesture data collection
+|-- capture_nogesture.py  # No_Gesture data collection
+|-- capture_nothing.py    # blank-scene data collection
+|-- gesture_utils.py      # Shared MediaPipe landmark preprocessing
 |-- train.py              # Model training
 `-- requirements.txt
 ```
